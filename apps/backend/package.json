@@ -18,6 +18,7 @@
     "migrate:create": "yarn migrate create",
     "test": "jest --runInBand",
     "test:ci": "jest --ci --coverage --runInBand",
+    "test:smoke": "jest --runInBand src/routes.smoke.test.ts",
     "loadtest:webhooks": "k6 run loadtest/webhooks.loadtest.js",
     "simulate:webhook": "tsx scripts/simulate-webhook.ts"
   },

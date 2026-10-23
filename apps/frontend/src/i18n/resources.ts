@@ -148,6 +148,18 @@ const resources = {
           mfaPromptTitle: "Enter your authentication code",
           mfaPromptDescription: "Enter the 6-digit code from your authenticator app to finish signing in.",
           mfaVerifyButton: "Verify",
+          recoveryCodesTitle: "Save your recovery codes",
+          recoveryCodesDescription:
+            "If you lose your authenticator device, you can use one of these codes to sign in. Each code works once. They will not be shown again.",
+          recoveryCodesCopy: "Copy codes",
+          recoveryCodesDone: "I've saved them",
+          recoveryCodesRegenerate: "Generate new recovery codes",
+          recoveryCodesError: "Could not generate recovery codes. Please try again.",
+          useRecoveryCode: "Lost your device? Use a recovery code",
+          useAuthenticatorCode: "Use authenticator app code instead",
+          recoveryCodeLabel: "Enter one of your recovery codes",
+          recoveryCodeInvalid: "That recovery code is invalid or has already been used.",
+          recoveryCodeSuccess: "Recovery code accepted. 2FA was turned off — please set it up again.",
         },
       },
 
@@ -684,6 +696,18 @@ const resources = {
           mfaPromptDescription:
             "Introduce el código de 6 dígitos de tu app de autenticación para completar el inicio de sesión.",
           mfaVerifyButton: "Verificar",
+          recoveryCodesTitle: "Guarda tus códigos de recuperación",
+          recoveryCodesDescription:
+            "Si pierdes tu dispositivo de autenticación, puedes usar uno de estos códigos para iniciar sesión. Cada código funciona una sola vez. No se volverán a mostrar.",
+          recoveryCodesCopy: "Copiar códigos",
+          recoveryCodesDone: "Ya los guardé",
+          recoveryCodesRegenerate: "Generar nuevos códigos de recuperación",
+          recoveryCodesError: "No se pudieron generar los códigos de recuperación. Inténtalo de nuevo.",
+          useRecoveryCode: "¿Perdiste tu dispositivo? Usa un código de recuperación",
+          useAuthenticatorCode: "Usar el código de la app de autenticación",
+          recoveryCodeLabel: "Introduce uno de tus códigos de recuperación",
+          recoveryCodeInvalid: "Ese código de recuperación no es válido o ya fue usado.",
+          recoveryCodeSuccess: "Código aceptado. Se desactivó la 2FA — vuelve a configurarla.",
         },
       },
 

@@ -1,7 +1,7 @@
 import { Notification } from '../types/notification';
 import { NotificationRepository } from '../repositories/notification.repository';
 import { logger } from '../utils/logger';
-import { captureException } from '../utils/sentry';
+import { captureException } from '../lib/sentry';
 
 const MAX_DELIVERY_ATTEMPTS = 5;
 const BASE_BACKOFF_MS = 200;

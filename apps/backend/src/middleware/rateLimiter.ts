@@ -34,3 +34,27 @@ export const authRateLimiter = rateLimit({
     return env.NODE_ENV === "test";
   },
 });
+
+const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * Rate limiter for sensitive write routes (#263) — dispute creation, refund
+ * requests, listing creation, transfers, etc. Reads are not throttled.
+ */
+export const writeRateLimiter = rateLimit({
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  max: env.RATE_LIMIT_MAX,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler(_req, res) {
+    res.status(429).json({
+      error: {
+        code: "RATE_LIMIT_EXCEEDED",
+        message: "Too many requests. Please try again later.",
+      },
+    });
+  },
+  skip(req) {
+    return env.NODE_ENV === "test" || READ_METHODS.has(req.method);
+  },
+});

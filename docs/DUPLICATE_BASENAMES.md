@@ -98,7 +98,7 @@ pattern across `single-release/` vs `multi-release/` variants.
 
 | Basename | Paths | Recommendation |
 |---|---|---|
-| `ApolloTestComponent.tsx` | `components/__dev__/` and `components/dev/` | `__dev__/` is the old location; `dev/` is current. Delete `__dev__/ApolloTestComponent.tsx`. |
+| `ApolloTestComponent.tsx` | `components/__dev__/` and `components/dev/` | Both unused copies were removed in #373; no active component remains. |
 | `EscrowStatusBadge.tsx` | `components/dashboard/` and `components/escrow/` | Two visually different badges. The `dashboard/` version is simpler. **Keep both; rename `dashboard/` copy to `DashboardEscrowStatusBadge.tsx` to remove ambiguity.** |
 | `Header.tsx` | `components/layouts/Header.tsx` and `layouts/Header.tsx` | The `layouts/Header.tsx` at the `src/` level appears to be the newer, more complete version. **Delete `components/layouts/Header.tsx` and update its import sites.** |
 | `NotificationPreferences.tsx` | `dashboard/profile/` and `notifications/` | Different purposes (settings form vs live preference toggle). **Keep both; no rename needed.** |
@@ -106,7 +106,7 @@ pattern across `single-release/` vs `multi-release/` variants.
 | `firebase.ts` | `frontend/src/lib/` and `backend/src/config/` | Frontend Firebase client vs backend Firebase Admin — different SDKs, different tree. **Keep both; no action needed.** |
 | `hasura.ts` | `frontend/src/lib/server/` and `backend/src/lib/` | Frontend server-side Hasura helper vs backend Hasura client. **Keep both; no action needed.** |
 | `config.ts` | `i18n/config.ts` and `lib/trustless-work/config.ts` | Unrelated configs in different trees. **Keep both; no action needed.** |
-| `sentry.ts` | `backend/src/lib/sentry.ts` and `backend/src/config/sentry.ts` | Possible duplication within the backend itself. **Owner to review: consolidate into `config/sentry.ts` and re-export from `lib/` if needed.** |
+| `sentry.ts` | `backend/src/lib/sentry.ts` (formerly also `backend/src/config/sentry.ts`) | Resolved (#260): merged into `lib/sentry.ts`, which is now the only place Sentry is configured and initialised. |
 | `escrow.ts` | `graphql/mutations/escrow.ts` and `types/escrow.ts` | Different purposes (GQL mutation strings vs TypeScript types). **Keep both; no action needed.** |
 | `TicketListingCard.tsx` | `ticket-listing/` and `app/listing/components/` | The `app/listing/components/` copy may be a page-local variant. **Owner to review: extract shared logic into `ticket-listing/` and delete the `app/` copy, or document why they differ.** |
 | `TicketListingDetailsCard.tsx` | `ticket-listing/cards/` and `app/listing/components/` | Same situation as `TicketListingCard.tsx` above. |

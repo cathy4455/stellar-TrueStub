@@ -27,6 +27,7 @@ import { format } from 'date-fns';
 import { EscrowData } from './RoleEscrowDashboard';
 import { useRouter } from 'next/navigation';
 import { useTranslation } from 'react-i18next';
+import { formatEscrowAmount } from '@/lib/formatEscrowAmount';
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
@@ -95,15 +96,6 @@ export function EscrowTable({ escrows, userRole, isLoading = false }: EscrowTabl
 
   const handleViewDetails = (escrowId: string) => {
     router.push(`/dashboard/escrow/${escrowId}`);
-  };
-
-  const formatCurrency = (amount: number, currency: string) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: currency === 'XLM' ? 'USD' : currency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 6,
-    }).format(amount);
   };
 
   const formatDate = (dateString?: string) => {
@@ -255,7 +247,7 @@ export function EscrowTable({ escrows, userRole, isLoading = false }: EscrowTabl
       <dl className="mt-3 grid grid-cols-2 gap-x-2 gap-y-1.5 text-sm">
         <dt className="text-gray-500 dark:text-gray-400">{t('dashboard.tableAmount')}</dt>
         <dd className="text-right text-gray-900 dark:text-white font-medium">
-          {formatCurrency(escrow.amount, escrow.asset.code)}
+          {formatEscrowAmount(escrow.amount, escrow.asset.code)}
         </dd>
         <dt className="text-gray-500 dark:text-gray-400">{t('dashboard.transferDate')}</dt>
         <dd className="text-right text-gray-900 dark:text-white">{formatDate(escrow.metadata?.transferDate)}</dd>
@@ -311,7 +303,7 @@ export function EscrowTable({ escrows, userRole, isLoading = false }: EscrowTabl
                 <TableCell className="text-gray-900 dark:text-white">{formatDate(escrow.metadata?.transferDate)}</TableCell>
                 <TableCell className="text-gray-900 dark:text-white">{formatDate(escrow.metadata?.eventDate)}</TableCell>
                 <TableCell className="text-gray-900 dark:text-white">
-                  {formatCurrency(escrow.amount, escrow.asset.code)}
+                  {formatEscrowAmount(escrow.amount, escrow.asset.code)}
                 </TableCell>
                 <TableCell>
                   <Badge

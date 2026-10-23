@@ -20,6 +20,22 @@ CREATE TABLE IF NOT EXISTS reviews (
     CONSTRAINT unique_escrow_reviewer UNIQUE (escrow_id, reviewer_id)
 );
 
+-- Duplicate-review safeguard: ensure the (escrow_id, reviewer_id) uniqueness
+-- constraint exists even if the table was created by an earlier revision of
+-- this migration without it. One review per escrow per reviewer.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'unique_escrow_reviewer'
+          AND conrelid = 'reviews'::regclass
+    ) THEN
+        ALTER TABLE reviews
+            ADD CONSTRAINT unique_escrow_reviewer UNIQUE (escrow_id, reviewer_id);
+    END IF;
+END $$;
+
 -- Indices for performance
 CREATE INDEX IF NOT EXISTS idx_reviews_reviewee_id ON reviews(reviewee_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_reviewer_id ON reviews(reviewer_id);

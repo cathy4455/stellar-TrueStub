@@ -1,9 +1,15 @@
 /**
- * Error tracking (#111).
+ * Error tracking (#111) — the single home for Sentry in the backend (#260).
  *
- * Thin wrapper around the Sentry SDK. `initSentry` is a no-op when
- * `SENTRY_DSN` isn't set, so local dev and CI run without a Sentry project
- * configured. Call `initSentry()` before the Express app is created.
+ * All Sentry configuration and initialisation lives in this file. There used
+ * to be a second copy in `config/sentry.ts` with a different sample rate; it
+ * was merged in here so the two can no longer disagree. Everything else in
+ * the backend should import Sentry helpers from `lib/sentry`, never call
+ * `Sentry.init` itself.
+ *
+ * `initSentry` is called once from `index.ts` at process start. It is a
+ * no-op when `SENTRY_DSN` isn't set (local dev, CI), and later calls are
+ * ignored, so Sentry can't be initialised twice.
  *
  * Also exposes `alertCriticalFailure` (#328): a dedicated, higher-urgency
  * alert channel for money/listing-critical failures (refunds, ownership
@@ -14,17 +20,34 @@
 import * as Sentry from "@sentry/node";
 import { env } from "../config/env";
 import { logger } from "./logger";
-import { getRequestId } from "./requestLogger";
+import { getCorrelationId as getRequestId } from "../middleware/requestLogger";
+
+/**
+ * Tag key used to mark events that belong to the escrow-status webhook
+ * integration. Alert rules in Sentry can filter on this tag so that
+ * unmapped-status 400s raise a dedicated alert instead of being buried in
+ * generic error noise.
+ */
+export const ESCROW_STATUS_WEBHOOK_TAG = "escrow_status_webhook";
+
+let sentryInitialized = false;
 
 export function initSentry(): void {
-  if (!env.SENTRY_DSN) {
+  if (sentryInitialized || !env.SENTRY_DSN) {
     return;
   }
+  sentryInitialized = true;
 
   Sentry.init({
     dsn: env.SENTRY_DSN,
     environment: env.NODE_ENV,
+    // Capture 10% of transactions in production only.
     tracesSampleRate: env.NODE_ENV === "production" ? 0.1 : 0,
+    // Always attach the environment tag so alert rules scoped to a specific
+    // environment (e.g. production) fire correctly.
+    initialScope: {
+      tags: { environment: env.NODE_ENV },
+    },
     // Attach the current request correlation ID (from AsyncLocalStorage) to
     // every event so Sentry events share the same ID as the log lines across
     // the refund→dispute→changelog chain (#425).
@@ -37,6 +60,38 @@ export function initSentry(): void {
       return event;
     },
   });
+}
+
+/**
+ * Attach a request's correlation ID (and optional extra context) to the
+ * current Sentry scope, so every event captured while handling the request
+ * carries it.
+ */
+export function setSentryRequestContext(
+  requestId: string,
+  context: Record<string, unknown> = {},
+): void {
+  Sentry.setTag("requestId", requestId);
+  Sentry.setContext("request", { requestId, ...context });
+}
+
+/**
+ * Alert raised when the dispute-resolver wallet balance drops below its
+ * configured threshold (#420), so it can be topped up before a refund fails.
+ */
+export function captureLowBalanceAlert(details: {
+  walletAddress: string;
+  balance: number;
+  threshold: number;
+}): void {
+  Sentry.captureMessage(
+    `[LOW_BALANCE] Dispute-resolver wallet balance ${details.balance} is below threshold ${details.threshold}`,
+    {
+      level: "warning",
+      tags: { alert: "dispute_resolver_low_balance" },
+      extra: { ...details },
+    },
+  );
 }
 
 /**

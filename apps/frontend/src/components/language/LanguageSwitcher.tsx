@@ -35,10 +35,14 @@ export default function LanguageSwitcher({
     LANGUAGES[0];
 
   const handleLanguageChange = (code: string) => {
-    // Persisted to localStorage by the languageChanged listener in i18n/config.
+    // Persisted to localStorage (key `i18nextLng`) by the languageChanged
+    // listener in i18n/config. On reload, ClientProviders re-applies it right
+    // after hydration via applyDetectedLanguage.
     i18n.changeLanguage(code);
   };
 
+  // The server always renders DEFAULT_LANGUAGE, so render a fixed placeholder
+  // until mounted to keep the first client render identical to the server's.
   if (!mounted) {
     return (
       <Button

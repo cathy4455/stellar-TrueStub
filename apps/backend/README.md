@@ -201,3 +201,83 @@ send, as documented in Trustless Work's API reference. The canonical list is:
   table above.
 - When Trustless Work introduces a new status, update `STATUS_MAP`, the table
   above, and the test that asserts the map covers the documented statuses.
+
+## Changelog (audit log) API
+
+`src/routes/changelog.ts` (issue #155) is the backend's **audit log**: a
+write-once record of the significant things that happen to money and
+ownership in TrueStub — disputes being raised and resolved, refunds,
+ticket transfers, and account deletions.
+
+### Why a ticket-escrow app needs it
+
+TrueStub holds buyers' money in escrow and moves ticket ownership between
+users. When something goes wrong — a buyer says they never got a refund, a
+seller disputes a resolution, support needs to explain why a dispute was
+escalated — we need a trustworthy answer to "what happened, when, and who
+did it". Normal logs rotate and can't be relied on for that, and database
+rows get updated in place, losing their history.
+
+The changelog is that answer. Its rules exist to keep it trustworthy:
+
+- **Write-once.** An entry can't be edited. `PUT` and `PATCH` always return
+  `409 CHANGELOG_UPDATE_FORBIDDEN`. If an entry is wrong, `DELETE` it and
+  `POST` a corrected one, so the correction is itself visible.
+- **Actor comes from the token.** `actorId` is taken from the verified
+  Firebase token, never from the request body, so entries can't be forged on
+  someone else's behalf (#379).
+- **Fixed entry types.** `action` must be one of the types in
+  `src/services/changelog-taxonomy.ts` (documented in
+  [docs/CHANGELOG_TAXONOMY.md](../../docs/CHANGELOG_TAXONOMY.md)); anything
+  else is rejected with `400 CHANGELOG_UNKNOWN_ENTRY_TYPE` (#416).
+- **Correlated.** Each entry stores the request's `requestId`, so one refund
+  can be traced across logs, Sentry and the changelog (#425).
+
+### What writes to it
+
+| Entry type | Written by | `resourceId` |
+| --- | --- | --- |
+| `dispute.raised`, `dispute.escalated`, `dispute.resolved`, `dispute.withdrawn` | `DisputeService` on every dispute state transition (`src/services/dispute.service.ts`) | disputeId |
+| `dispute.sla_breach` | `GET /api/disputes/sla/breaches` when an escalated dispute is past its SLA (`src/routes/disputes.ts`) | disputeId |
+| `account.deleted` | `DELETE /api/users/me` after anonymising an account — records only the uid and reason, no PII (`src/routes/users.ts`) | userId |
+| `refund.submitted`, `refund.completed`, `transfer.completed` | Reserved in the taxonomy for the refund and transfer flows; those flows don't write them yet | refundId / transferId |
+
+Backend code writes through `changelogService.appendEntry()` directly.
+`POST /api/changelog` is for authenticated clients and operator tooling that
+need to record an event the backend doesn't produce itself. Audit writes are
+best-effort: a failed changelog write never rolls back the action it
+describes.
+
+### Who reads it
+
+- **Support and operators** investigating a dispute, refund or deletion use
+  `GET /api/changelog/resource/:resourceId` (paginated with `limit` /
+  `offset`) to see the full history of one resource, and
+  `GET /api/changelog/:entryId` for one entry.
+- **The refund end-to-end check** in `src/routes/refunds.ts` asserts that the
+  changelog recorded every step of the refund → dispute chain.
+- **Audit-log forwarders** can subscribe to `ENTRY_APPENDED` / `ENTRY_REMOVED`
+  events with `changelogService.onEvent(...)` to ship entries to long-term
+  storage. None is registered yet.
+
+### Endpoints
+
+All routes require `Authorization: Bearer <Firebase ID token>`.
+
+| Method | Path | Result |
+| --- | --- | --- |
+| `POST` | `/api/changelog` | `201` with the new entry |
+| `GET` | `/api/changelog/:entryId` | `200` with the entry, or `404` |
+| `GET` | `/api/changelog/resource/:resourceId` | `200` with a page of entries |
+| `DELETE` | `/api/changelog/:entryId` | `200`, emits `ENTRY_REMOVED` |
+| `PUT` / `PATCH` | `/api/changelog/:entryId` | always `409 CHANGELOG_UPDATE_FORBIDDEN` |
+
+### Known limitations
+
+- Entries are held **in memory** (`ChangelogService` uses a `Map`), so they
+  are lost on restart and not shared between instances. Durable storage and
+  the archival plan are described at the top of
+  `src/services/changelog.service.ts` (#432).
+- `DisputeService` creates its own `ChangelogService` instance, so dispute
+  transition entries are not yet visible through `/api/changelog`. Wiring it
+  to the shared `changelogService` will fix that.

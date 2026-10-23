@@ -7,6 +7,7 @@
  * error handling. See that file for the full layering note.
  */
 import { hasuraClient, type HasuraRequestOptions } from "../lib/hasura";
+import { queryWithTimeout } from "../lib/postgres";
 import { AppError } from "../middleware/errorHandler";
 import { getCorrelationId as getRequestId } from "../middleware/requestLogger";
 
@@ -50,6 +51,26 @@ export interface EscrowStatusRow {
 
 interface EscrowStatusQueryResult {
   escrow_transactions?: EscrowStatusRow[];
+}
+
+export const LOCKED_ESCROW_STATUSES = [
+  "pending",
+  "funded",
+  "in_progress",
+  "in-progress",
+  "active",
+  "released",
+  "completed",
+  "complete",
+] as const;
+
+export interface ListingEscrowLockRow {
+  id: string;
+  status: string;
+}
+
+interface ListingEscrowLockQueryResult {
+  escrow_transactions?: ListingEscrowLockRow[];
 }
 
 export class HasuraService {
@@ -289,5 +310,43 @@ export class HasuraService {
       { requestId: options.requestId ?? getRequestId() }
     );
     return data.escrow_transactions ?? [];
+  }
+
+  static async findLockingEscrowForListing(
+    listingId: string,
+    options: HasuraRequestOptions = {}
+  ): Promise<ListingEscrowLockRow | null> {
+    const query = `
+      query LockingEscrowForListing($listingId: uuid!, $statuses: [String!]!) {
+        escrow_transactions(
+          where: { listing_id: { _eq: $listingId }, status: { _in: $statuses } }
+          limit: 1
+        ) {
+          id
+          status
+        }
+      }
+    `;
+
+    const data = await hasuraClient.request<ListingEscrowLockQueryResult>(
+      query,
+      { listingId, statuses: [...LOCKED_ESCROW_STATUSES] },
+      { requestId: options.requestId ?? getRequestId() }
+    );
+    return data.escrow_transactions?.[0] ?? null;
+  }
+
+  static async findLockingEscrowForListingFromPostgres(
+    listingId: string
+  ): Promise<ListingEscrowLockRow | null> {
+    const result = await queryWithTimeout<ListingEscrowLockRow>(
+      `SELECT id, status
+         FROM escrow_transactions
+        WHERE listing_id = $1
+          AND status = ANY($2::text[])
+        LIMIT 1`,
+      [listingId, [...LOCKED_ESCROW_STATUSES]]
+    );
+    return result.rows?.[0] ?? null;
   }
 }

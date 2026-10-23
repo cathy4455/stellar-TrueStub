@@ -23,6 +23,14 @@ interface EscrowAnalyticsDay {
   avgReleaseHours: number;
 }
 
+interface AssetBreakdownEntry {
+  currency: string;
+  volume: number;
+  completedVolume: number;
+  escrowsCreated: number;
+  escrowsCompleted: number;
+}
+
 const PAGE_SIZE = 500;
 const ACTIVE_STATUSES = [
   "pending", "funded", "active", "disputed",
@@ -30,6 +38,7 @@ const ACTIVE_STATUSES = [
 ];
 const COMPLETED_STATUSES = new Set(["completed", "released", "resolved"]);
 const DOLLAR_DENOMINATED_CURRENCIES = new Set(["USD", "USDC"]);
+const UNKNOWN_CURRENCY = "UNKNOWN";
 
 async function fetchEscrows(where: Record<string, unknown>): Promise<EscrowRow[]> {
   const query = `
@@ -67,8 +76,18 @@ async function fetchEscrows(where: Record<string, unknown>): Promise<EscrowRow[]
   return rows;
 }
 
+function currencyOf(row: EscrowRow): string {
+  const currency = row.currency?.trim().toUpperCase();
+  return currency ? currency : UNKNOWN_CURRENCY;
+}
+
 function amountOf(row: EscrowRow): number {
   if (!DOLLAR_DENOMINATED_CURRENCIES.has(row.currency?.toUpperCase() ?? "")) return 0;
+  const amount = Number(row.amount);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function rawAmountOf(row: EscrowRow): number {
   const amount = Number(row.amount);
   return Number.isFinite(amount) ? amount : 0;
 }
@@ -128,6 +147,16 @@ analyticsRouter.get("/", async (req, res) => {
     let completedDurationTotal = 0;
     let completedDurationCount = 0;
     const completedDurationsByDay = new Map<string, { total: number; count: number }>();
+    const assetBreakdown = new Map<string, AssetBreakdownEntry>();
+
+    const assetEntry = (currency: string): AssetBreakdownEntry => {
+      let entry = assetBreakdown.get(currency);
+      if (!entry) {
+        entry = { currency, volume: 0, completedVolume: 0, escrowsCreated: 0, escrowsCompleted: 0 };
+        assetBreakdown.set(currency, entry);
+      }
+      return entry;
+    };
 
     for (const row of periodRows) {
       const date = new Date(row.created_at).toISOString().slice(0, 10);
@@ -135,10 +164,18 @@ analyticsRouter.get("/", async (req, res) => {
       if (!bucket) continue;
 
       const status = row.status.toLowerCase();
+      const currency = currencyOf(row);
+      const entry = assetEntry(currency);
+      const rawAmount = rawAmountOf(row);
+
       bucket.volume += amountOf(row);
       bucket.escrowsCreated += 1;
+      entry.volume += rawAmount;
+      entry.escrowsCreated += 1;
       if (COMPLETED_STATUSES.has(status)) {
         bucket.escrowsCompleted += 1;
+        entry.escrowsCompleted += 1;
+        entry.completedVolume += rawAmount;
         const duration = releaseDurationHours(row);
         if (duration !== null) {
           bucket.avgReleaseHours += duration;
@@ -168,6 +205,9 @@ analyticsRouter.get("/", async (req, res) => {
 
     return res.json({
       escrowChartData: chartData,
+      assetBreakdown: Array.from(assetBreakdown.values()).sort((a, b) =>
+        a.currency.localeCompare(b.currency),
+      ),
       platformHealth: {
         totalVolume: chartData.reduce((sum, bucket) => sum + bucket.volume, 0),
         activeEscrows: activeRows.length,

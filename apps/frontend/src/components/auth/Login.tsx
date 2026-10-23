@@ -30,6 +30,8 @@ import { useTranslation } from "react-i18next";
 import LanguageSwitcher from "@/components/language/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
+
 export default function LoginPage() {
   const { t } = useTranslation();
   const { address, token } = useGlobalAuthenticationStore();
@@ -58,6 +60,7 @@ export default function LoginPage() {
   const [mfaCode, setMfaCode] = useState("");
   const [mfaError, setMfaError] = useState("");
   const [isMfaLoading, setIsMfaLoading] = useState(false);
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
 
   const getErrorMessage = (code: string) => {
     switch (code) {
@@ -143,9 +146,40 @@ export default function LoginPage() {
     }
   };
 
+  // #266 — redeem a recovery code: the backend removes the lost 2FA factor,
+  // then we sign in again with the email/password already entered.
+  const handleRecoverySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsMfaLoading(true);
+    setMfaError("");
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/auth/recovery-codes/redeem`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code: mfaCode }),
+      });
+      if (!response.ok) {
+        setMfaError(t("auth.twoFactor.recoveryCodeInvalid"));
+        return;
+      }
+
+      toast.success(t("auth.twoFactor.recoveryCodeSuccess"));
+      setMfaResolver(null);
+      setUseRecoveryCode(false);
+      setMfaCode("");
+      await handleLogin(e);
+    } catch {
+      setMfaError(t("auth.twoFactor.genericError"));
+    } finally {
+      setIsMfaLoading(false);
+    }
+  };
+
   const handleMfaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!mfaResolver) return;
+    if (useRecoveryCode) return handleRecoverySubmit(e);
 
     setIsMfaLoading(true);
     setMfaError("");
@@ -215,19 +249,29 @@ export default function LoginPage() {
                 </p>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="mfa-code">{t("auth.twoFactor.codeLabel")}</Label>
+                <Label htmlFor="mfa-code">
+                  {useRecoveryCode
+                    ? t("auth.twoFactor.recoveryCodeLabel")
+                    : t("auth.twoFactor.codeLabel")}
+                </Label>
                 <Input
                   id="mfa-code"
-                  inputMode="numeric"
+                  inputMode={useRecoveryCode ? "text" : "numeric"}
                   autoComplete="one-time-code"
-                  placeholder={t("auth.twoFactor.codePlaceholder")}
+                  placeholder={
+                    useRecoveryCode ? "xxxxx-xxxxx" : t("auth.twoFactor.codePlaceholder")
+                  }
                   required
                   value={mfaCode}
                   onChange={(e) => {
-                    setMfaCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+                    setMfaCode(
+                      useRecoveryCode
+                        ? e.target.value.slice(0, 32)
+                        : e.target.value.replace(/\D/g, "").slice(0, 6),
+                    );
                     setMfaError("");
                   }}
-                  maxLength={6}
+                  maxLength={useRecoveryCode ? 32 : 6}
                 />
               </div>
 
@@ -238,10 +282,26 @@ export default function LoginPage() {
               <Button
                 type="submit"
                 className="w-full bg-[#2857B8] hover:bg-[#2857B8]/90"
-                disabled={isMfaLoading || mfaCode.length !== 6}
+                disabled={
+                  isMfaLoading || (useRecoveryCode ? mfaCode.trim().length === 0 : mfaCode.length !== 6)
+                }
               >
                 {isMfaLoading ? t("auth.signingIn") : t("auth.twoFactor.mfaVerifyButton")}
               </Button>
+
+              <button
+                type="button"
+                className="w-full text-center text-sm text-[#2857B8] hover:underline"
+                onClick={() => {
+                  setUseRecoveryCode((v) => !v);
+                  setMfaCode("");
+                  setMfaError("");
+                }}
+              >
+                {useRecoveryCode
+                  ? t("auth.twoFactor.useAuthenticatorCode")
+                  : t("auth.twoFactor.useRecoveryCode")}
+              </button>
             </form>
           ) : (
             <>

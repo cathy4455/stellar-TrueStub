@@ -3,7 +3,7 @@
 What runs in CI, how to run the same checks locally, and what is (and isn't)
 automated around deployment.
 
-_Last verified against `.github/workflows/`: 2026-10-18. An earlier version of
+_Last verified against `.github/workflows/`: 2026-10-20. An earlier version of
 this page described a "Next.js CI/CD Pipeline" workflow with Cypress, Snyk,
 TruffleHog, Lighthouse, OWASP ZAP and environment-specific Vercel deploys.
 None of those exist in this repository. If you add a workflow, add it to the
@@ -20,6 +20,7 @@ workspace gets deployed, see [`DEPLOYMENT.md`](./DEPLOYMENT.md).
 | `frontend-ci.yml` | PRs touching `apps/frontend/**` or root Yarn files | Wiring-TODO lint (each `// TODO: Replace with actual API call` must reference an issue), lint, typecheck, test, build, bundle-size budget |
 | `frontend-ci.yml` → `secret-scan` | Every PR | gitleaks over the PR's commits (see [`SECRET_SCANNING.md`](./SECRET_SCANNING.md)) |
 | `backend-ci.yml` | PRs touching `apps/backend/**` or root Yarn files | Against a PostGIS service container: apply migrations, roll every migration back and check the schema is back where it started, re-apply, then typecheck, build, test |
+| `contracts-ci.yml` | Push/PRs touching `contracts/**` | fmt check, clippy (`-D warnings`), `cargo test`, `cargo build --target wasm32-unknown-unknown --release`; respects committed `Cargo.lock` (see `contracts/README.md`) |
 | `security-and-deploy-checks.yml` | Push to `main`, PRs, daily 06:00 UTC, manual | Production-mode backend leaks no stack traces; frontend bundle contains no backend-only secrets; backend Docker image builds and starts |
 | `chromatic.yml` | PRs touching frontend components / Storybook / styles | Visual regression via Chromatic |
 | `migration-collision-check.yml` | PRs | Comments when another open PR adds a migration with the same sequence number |

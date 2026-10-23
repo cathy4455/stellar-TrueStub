@@ -18,6 +18,13 @@ Postgres instance with:
 yarn workspace @truestub/backend migrate:up
 ```
 
+> **Migration file count**: There are **8 migration files** covering version
+> numbers 001–007. Two files share the `007` prefix
+> (`007_add_idempotency_unique_constraints.sql` and
+> `007_create_notification_dead_letters.sql`). `node-pg-migrate` applies them
+> in filename-alphabetical order, so `007_add_idempotency…` runs before
+> `007_create_notification…`. Both must be applied for a consistent schema.
+
 | Table or view | Purpose and relationships | Defined by |
 | --- | --- | --- |
 | `reviews` | Buyer/seller reviews associated with an `escrow_id`; one review per escrow and reviewer. Ratings are constrained to 1–5. | `001_create_ratings_reviews.sql` |
@@ -33,6 +40,7 @@ yarn workspace @truestub/backend migrate:up
 | `refund_idempotency` | Idempotency keys for refund requests; unique on both `idempotency_key` and `refund_id` so concurrent duplicates fail at the database. | `007_add_idempotency_unique_constraints.sql` |
 | `transfer_idempotency` | Same as `refund_idempotency`, for ownership-transfer requests. | `007_add_idempotency_unique_constraints.sql` |
 | `notification_dead_letters` | Notifications that could not be delivered, with the payload, last error, and attempt count. | `007_create_notification_dead_letters.sql` |
+| `migration_audit_log` | Append-only audit log of each migration run, including the migration name, direction (`up`/`down`), outcome, and timestamp. Created at runtime by `migrationAudit.ts`'s `ensureAuditTable()` function — not a SQL migration file. | Runtime (`apps/backend/src/db/migrationAudit.ts`) |
 
 Migration `006_normalize_events_primary_key.sql` renames the legacy primary-key
 constraint to `events_pkey` where required; it does not create a table.

@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import { EscrowData } from "./RoleEscrowDashboard";
+import { formatEscrowAmount } from "@/lib/formatEscrowAmount";
 import { MilestoneProgress } from "./milestone-progress";
 import { ApproveMilestone } from "@/components/tw-blocks/escrows/multi-release/approve-milestone/ApproveMilestone";
 import { ChangeMilestoneStatus } from "@/components/tw-blocks/escrows/multi-release/change-milestone-status/ChangeMilestoneStatus";
@@ -114,22 +115,7 @@ export function EscrowStatusCard({
            <div className="flex justify-between text-sm">
              <span className="text-muted-foreground">Amount:</span>
              <span className="font-medium dark:text-white">
-               {(() => {
-                 try {
-                   return new Intl.NumberFormat("en-US", {
-                     style: "currency",
-                     currency:
-                       escrow.asset.code === "XLM" ? "USD" : escrow.asset.code,
-                     minimumFractionDigits: 2,
-                     maximumFractionDigits: 6,
-                   }).format(escrow.amount);
-                 } catch (e) {
-                   // Fallback to a simple format
-                   const currency =
-                     escrow.asset.code === "XLM" ? "USD" : escrow.asset.code;
-                   return `${currency} ${escrow.amount.toFixed(2)}`;
-                 }
-               })()}
+               {formatEscrowAmount(escrow.amount, escrow.asset.code)}
              </span>
            </div>
 

@@ -102,3 +102,56 @@ jobs:
 
       - name: Test backend
         run: yarn workspace @truestub/backend test
+
+      # #261 — hit every mounted route's basic contract (health 200, auth-
+      # required routes 401 without/with a bad token, webhook signature check).
+      - name: Smoke test backend routes
+        run: yarn workspace @truestub/backend test:smoke
+
+      # #261 — boot the compiled server the way production does and make sure
+      # it actually listens and responds. Fails if `node dist/index.js` crashes
+      # on startup, which unit tests importing the app can't catch.
+      - name: Boot compiled backend and check it responds
+        working-directory: apps/backend
+        env:
+          NODE_ENV: development
+          PORT: "4100"
+          LOG_LEVEL: warn
+          DATABASE_URL: postgres://postgres:postgrespassword@localhost:5432/safetrust
+          FIREBASE_ADMIN_PROJECT_ID: ci-smoke
+          FIREBASE_ADMIN_CLIENT_EMAIL: ci-smoke@ci-smoke.iam.gserviceaccount.com
+          # Not a real key, so Firebase Admin starts without credentials.
+          FIREBASE_ADMIN_PRIVATE_KEY: ci-smoke-placeholder
+        run: |
+          node dist/index.js > "$RUNNER_TEMP/backend.log" 2>&1 &
+          server_pid=$!
+
+          for _ in $(seq 30); do
+            if curl -fsS "http://localhost:$PORT/health" > /dev/null 2>&1; then
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              echo "::error::Backend exited during startup."
+              cat "$RUNNER_TEMP/backend.log"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          fail() {
+            echo "::error::$1"
+            cat "$RUNNER_TEMP/backend.log"
+            kill "$server_pid" 2>/dev/null || true
+            exit 1
+          }
+
+          health=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PORT/health")
+          [ "$health" = "200" ] || fail "GET /health returned $health, expected 200."
+
+          for path in /api/refunds/claim /api/transfers/initiate /api/changelog /api/disputes; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+              -H "Content-Type: application/json" -d '{}' "http://localhost:$PORT$path")
+            [ "$code" = "401" ] || fail "POST $path without a token returned $code, expected 401."
+          done
+
+          kill "$server_pid"

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { checkDisputeResolverBalance } from "../services/disputeResolverBalance";
+import { checkDisputeResolverBalance } from "../services/dispute-resolver-balance.service";
 
 export const healthRouter = Router();
 
@@ -11,7 +11,7 @@ healthRouter.get("/dispute-resolver-balance", async (_req, res) => {
   try {
     const result = await checkDisputeResolverBalance();
     res.json({
-      status: result.ok ? "ok" : "low",
+      status: result.low ? "low" : "ok",
       balance: result.balance,
       threshold: result.threshold,
     });
@@ -22,4 +22,3 @@ healthRouter.get("/dispute-resolver-balance", async (_req, res) => {
     });
   }
 });
-</｜｜DSML｜｜ parameter>

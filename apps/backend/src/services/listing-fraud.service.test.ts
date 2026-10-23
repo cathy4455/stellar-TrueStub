@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   assessListingRisk,
   ticketListingFingerprint,
+  isActiveListing,
   type TicketListingRiskInput,
 } from "./listing-fraud.service";
 
@@ -17,6 +18,8 @@ const baseListing: TicketListingRiskInput = {
 };
 
 describe("listing fraud risk checks", () => {
+  // ── Fingerprint normalisation ──────────────────────────────────────────────
+
   it("normalizes listing fingerprints across casing and spacing", () => {
     const messyListing = {
       ...baseListing,
@@ -32,6 +35,8 @@ describe("listing fraud risk checks", () => {
     );
   });
 
+  // ── Tier 1: exact duplicate (high) ────────────────────────────────────────
+
   it("flags active duplicate listings from the same seller", () => {
     const result = assessListingRisk(
       { ...baseListing, id: "listing-2" },
@@ -41,7 +46,130 @@ describe("listing fraud risk checks", () => {
     expect(result.duplicate).toBe(true);
     expect(result.riskLevel).toBe("high");
     expect(result.matches).toHaveLength(1);
+    expect(result.matches[0].confidence).toBe(0.95);
+    expect(result.matches[0].reason).toMatch(/section, row, and seat/);
   });
+
+  it("ignores inactive historical listings (exact fingerprint)", () => {
+    const result = assessListingRisk(
+      { ...baseListing, id: "listing-2" },
+      [{ ...baseListing, status: "sold" }],
+    );
+
+    expect(result.duplicate).toBe(false);
+    expect(result.matches).toHaveLength(0);
+  });
+
+  // ── Tier 2: same section, different seat (medium) ─────────────────────────
+
+  it("returns medium risk for same seller/event/section but different seat", () => {
+    const existing: TicketListingRiskInput = {
+      ...baseListing,
+      id: "listing-1",
+      seat: "17",          // different seat from candidate
+      status: "active",
+    };
+
+    const result = assessListingRisk(
+      { ...baseListing, id: "listing-2", seat: "19" },
+      [existing],
+    );
+
+    expect(result.duplicate).toBe(false);
+    expect(result.riskLevel).toBe("medium");
+    expect(result.matches).toHaveLength(1);
+    expect(result.matches[0].confidence).toBe(0.6);
+    expect(result.matches[0].reason).toMatch(/different row or seat/);
+    expect(result.warning).toBeTruthy();
+  });
+
+  it("does not produce a section match when sections differ", () => {
+    const existing: TicketListingRiskInput = {
+      ...baseListing,
+      id: "listing-1",
+      section: "B",        // different section
+      seat: "17",
+      status: "active",
+    };
+
+    const result = assessListingRisk(
+      { ...baseListing, id: "listing-2", seat: "19" },
+      [existing],
+    );
+
+    // Falls through to tier 3 soft match (same event+seller, different section)
+    expect(result.riskLevel).toBe("low");
+    expect(result.matches[0]?.confidence).toBe(0.2);
+  });
+
+  // ── Tier 3: same event+seller, no section/seat overlap (low + warning) ────
+
+  it("returns low risk with warning for same seller/event but different section", () => {
+    const existing: TicketListingRiskInput = {
+      ...baseListing,
+      id: "listing-1",
+      section: "C",
+      row: "1",
+      seat: "1",
+      status: "pending",   // pending is still an active status
+    };
+
+    const result = assessListingRisk(
+      { ...baseListing, id: "listing-2", section: "D", row: "2", seat: "2" },
+      [existing],
+    );
+
+    expect(result.duplicate).toBe(false);
+    expect(result.riskLevel).toBe("low");
+    expect(result.matches).toHaveLength(1);
+    expect(result.matches[0].confidence).toBe(0.2);
+    expect(result.matches[0].reason).toMatch(/no section or seat overlap/);
+    expect(result.warning).toBeTruthy();
+  });
+
+  // ── Non-active listings are excluded ─────────────────────────────────────
+
+  it("does not match cancelled, sold, or expired listings", () => {
+    const inactiveStatuses = ["sold", "cancelled", "expired"];
+
+    for (const status of inactiveStatuses) {
+      const result = assessListingRisk(
+        { ...baseListing, id: "listing-2" },
+        [{ ...baseListing, status }],
+      );
+
+      expect(result.duplicate).toBe(false);
+      expect(result.matches).toHaveLength(0);
+    }
+  });
+
+  it("treats reserved and pending listings as active", () => {
+    for (const status of ["reserved", "pending"] as const) {
+      const result = assessListingRisk(
+        { ...baseListing, id: "listing-2" },
+        [{ ...baseListing, status }],
+      );
+
+      expect(result.duplicate).toBe(true);
+      expect(result.riskLevel).toBe("high");
+    }
+  });
+
+  // ── isActiveListing helper ────────────────────────────────────────────────
+
+  it("isActiveListing returns true for active/pending/reserved", () => {
+    expect(isActiveListing({ ...baseListing, status: "active" })).toBe(true);
+    expect(isActiveListing({ ...baseListing, status: "pending" })).toBe(true);
+    expect(isActiveListing({ ...baseListing, status: "reserved" })).toBe(true);
+  });
+
+  it("isActiveListing returns false for sold/cancelled/expired", () => {
+    expect(isActiveListing({ ...baseListing, status: "sold" })).toBe(false);
+    expect(isActiveListing({ ...baseListing, status: "cancelled" })).toBe(false);
+    expect(isActiveListing({ ...baseListing, status: "expired" })).toBe(false);
+  });
+
+  // ── Clean (no match) path ─────────────────────────────────────────────────
 
   it("allows different seats for legitimate multi-ticket sellers", () => {
     const result = assessListingRisk(
@@ -49,16 +177,24 @@ describe("listing fraud risk checks", () => {
       [baseListing],
     );
 
+    // Different seat in same section → section-level (medium) match, not exact
     expect(result.duplicate).toBe(false);
-    expect(result.matches).toHaveLength(0);
+    expect(result.riskLevel).toBe("medium");
   });
 
-  it("ignores inactive historical listings", () => {
-    const result = assessListingRisk(
-      { ...baseListing, id: "listing-2" },
-      [{ ...baseListing, status: "sold" }],
-    );
+  it("returns low risk with no matches when there are no existing listings", () => {
+    const result = assessListingRisk(baseListing, []);
 
     expect(result.duplicate).toBe(false);
+    expect(result.riskLevel).toBe("low");
+    expect(result.matches).toHaveLength(0);
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("excludes the candidate itself when it appears in the existing list", () => {
+    const result = assessListingRisk(baseListing, [baseListing]);
+
+    expect(result.duplicate).toBe(false);
+    expect(result.matches).toHaveLength(0);
   });
 });

@@ -60,9 +60,15 @@ const detectLanguage = (): string => {
   return DEFAULT_LANGUAGE;
 };
 
+// Always start in DEFAULT_LANGUAGE — on the server *and* on the client's
+// first render — so the hydrated markup matches what the server sent. The
+// stored / browser language is applied right after hydration by
+// `applyDetectedLanguage` (called from ClientProviders). Picking it here at
+// module load would make the client's first render differ from the server's
+// and trigger a hydration mismatch (#259).
 const initialized = i18n.use(initReactI18next).init({
   resources,
-  lng: detectLanguage(),
+  lng: DEFAULT_LANGUAGE,
   fallbackLng: DEFAULT_LANGUAGE,
   supportedLngs: SUPPORTED_LANGUAGES,
   nonExplicitSupportedLngs: true,
@@ -74,6 +80,10 @@ const initialized = i18n.use(initReactI18next).init({
   },
 });
 
+// Set while applyDetectedLanguage switches language, so that switch isn't
+// mistaken for an explicit user choice and persisted.
+let applyingDetectedLanguage = false;
+
 // Persist only explicit changes (i18n.changeLanguage from the switcher), not
 // the initial detection, so a visitor who never picks a language keeps
 // following their browser setting. init() emits its own languageChanged, so
@@ -82,8 +92,29 @@ initialized.then(() => {
   if (typeof window === "undefined") return;
   i18n.on("languageChanged", (lng) => {
     const supported = toSupportedLanguage(lng);
-    if (supported) writeStoredLanguage(supported);
+    if (!supported) return;
+    // Keep <html lang> in sync for screen readers and browser translation.
+    document.documentElement.lang = supported;
+    if (!applyingDetectedLanguage) writeStoredLanguage(supported);
   });
 });
+
+/**
+ * Switch to the visitor's saved (or browser) language. Must run on the client
+ * *after* hydration — e.g. from a `useEffect` — so the first client render
+ * still matches the server-rendered DEFAULT_LANGUAGE markup.
+ */
+export const applyDetectedLanguage = async (): Promise<void> => {
+  await initialized;
+  const detected = detectLanguage();
+  if (toSupportedLanguage(i18n.language) === detected) return;
+
+  applyingDetectedLanguage = true;
+  try {
+    await i18n.changeLanguage(detected);
+  } finally {
+    applyingDetectedLanguage = false;
+  }
+};
 
 export default i18n;

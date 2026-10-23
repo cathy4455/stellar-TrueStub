@@ -39,6 +39,7 @@ import {
   TrustlessWorkNotConfiguredError,
   trustlessWorkClient,
 } from "../lib/trustless-work";
+import { assertMainnetSubmissionAllowed, type NetworkGuardConfig } from "../lib/network-guard";
 import { getRequestId } from "../lib/requestContext";
 import { logger } from "../lib/logger";
 import { captureException } from "../lib/sentry";
@@ -97,6 +98,16 @@ export class TrustlessWorkRefundExecutor implements RefundExecutor {
   constructor(private readonly client: TrustlessWorkClient = trustlessWorkClient) {}
 
   async execute(claim: ClaimedRefund): Promise<{ txHash: string }> {
+    // Guard: refuse to submit mainnet transactions outside a production
+    // environment, even if network config was misconfigured (#373/#415).
+    const guardConfig: NetworkGuardConfig = {
+      nodeEnv: process.env.NODE_ENV,
+      stellarNetwork: process.env.STELLAR_NETWORK,
+      trustlessWorkApiUrl: process.env.TRUSTLESS_WORK_API_URL,
+      ci: process.env.CI,
+    };
+    assertMainnetSubmissionAllowed(guardConfig);
+
     const { txHash } = await this.client.resolveDispute({
       contractId: claim.escrowId,
       escrowType: claim.escrowType ?? "single-release",

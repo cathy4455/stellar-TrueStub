@@ -4,6 +4,7 @@ import { DollarSign, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-rea
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EscrowData } from './RoleEscrowDashboard';
 import { useTranslation } from 'react-i18next';
+import { formatEscrowAmount } from '@/lib/formatEscrowAmount';
 
 interface EscrowsByStatusProps {
   escrows: EscrowData[];
@@ -21,11 +22,17 @@ export function EscrowsByStatus({ escrows, userRole }: EscrowsByStatusProps) {
     cancelled: escrows.filter(e => e.status === 'cancelled').length,
   };
 
+  // Totals are kept per asset — summing XLM and USDC into one number is meaningless.
   const getTotalAmount = () => {
-    return escrows.reduce((sum, escrow) => {
-      if (escrow.status === 'cancelled') return sum;
-      return sum + escrow.amount;
-    }, 0);
+    const totals: Record<string, number> = {};
+    for (const escrow of escrows) {
+      if (escrow.status === 'cancelled') continue;
+      const code = escrow.asset?.code ?? 'USDC';
+      totals[code] = (totals[code] ?? 0) + escrow.amount;
+    }
+    const entries = Object.entries(totals);
+    if (entries.length === 0) return formatEscrowAmount(0, 'USDC');
+    return entries.map(([code, amount]) => formatEscrowAmount(amount, code)).join(' · ');
   };
 
   const getStatusStats = () => {
@@ -104,7 +111,7 @@ export function EscrowsByStatus({ escrows, userRole }: EscrowsByStatusProps) {
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold dark:text-white">
-            ${getTotalAmount().toLocaleString()}
+            {getTotalAmount()}
           </div>
           <p className="text-xs text-muted-foreground">
             {stats.total} {t('dashboard.totalEscrows')}

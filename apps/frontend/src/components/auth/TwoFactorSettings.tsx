@@ -16,6 +16,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { auth } from "@/lib/firebase";
 
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
+
 export function TwoFactorSettings() {
   const { t } = useTranslation();
   const [isEnrolled, setIsEnrolled] = useState(false);
@@ -26,6 +28,7 @@ export function TwoFactorSettings() {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
 
   useEffect(() => {
     return onAuthStateChanged(auth, (user) => {
@@ -80,10 +83,29 @@ export function TwoFactorSettings() {
       setTotpSecret(null);
       setCode("");
       toast.success(t("auth.twoFactor.enrollSuccess"));
+      await generateRecoveryCodes();
     } catch (err) {
       setError(describeError(err));
     } finally {
       setBusy(false);
+    }
+  };
+
+  // #266 — one-time recovery codes, shown once so the user can save them.
+  const generateRecoveryCodes = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+    try {
+      const idToken = await user.getIdToken(true);
+      const response = await fetch(`${BACKEND_URL}/api/auth/recovery-codes`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      if (!response.ok) throw new Error("Failed to generate recovery codes");
+      const data = (await response.json()) as { codes: string[] };
+      setRecoveryCodes(data.codes);
+    } catch {
+      setError(t("auth.twoFactor.recoveryCodesError"));
     }
   };
 
@@ -194,6 +216,40 @@ export function TwoFactorSettings() {
             </Button>
           </div>
         </form>
+      )}
+
+      {recoveryCodes.length > 0 && (
+        <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950/30">
+          <p className="text-sm font-medium">{t("auth.twoFactor.recoveryCodesTitle")}</p>
+          <p className="text-sm text-muted-foreground">
+            {t("auth.twoFactor.recoveryCodesDescription")}
+          </p>
+          <ul className="grid grid-cols-2 gap-2 font-mono text-sm">
+            {recoveryCodes.map((rc) => (
+              <li key={rc} className="rounded bg-white px-2 py-1 dark:bg-gray-900">
+                {rc}
+              </li>
+            ))}
+          </ul>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => navigator.clipboard.writeText(recoveryCodes.join("\n"))}
+            >
+              {t("auth.twoFactor.recoveryCodesCopy")}
+            </Button>
+            <Button type="button" onClick={() => setRecoveryCodes([])}>
+              {t("auth.twoFactor.recoveryCodesDone")}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {isEnrolled && !enrolling && recoveryCodes.length === 0 && (
+        <Button variant="link" className="px-0" onClick={generateRecoveryCodes} disabled={busy}>
+          {t("auth.twoFactor.recoveryCodesRegenerate")}
+        </Button>
       )}
 
       {!enrolling && error && <p className="text-sm text-red-600">{error}</p>}
