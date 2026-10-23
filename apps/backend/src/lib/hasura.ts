@@ -1,5 +1,22 @@
+/**
+ * Low-level Hasura transport (the bottom layer of backend → Hasura access).
+ *
+ * How backend code talks to Hasura:
+ *
+ *   routes / jobs  →  services/hasura.service.ts (HasuraService)  →  lib/hasura.ts (this file)  →  Hasura
+ *
+ * - This file owns ONLY the HTTP transport: reading the admin secret from
+ *   validated env, sending it as a header, forwarding the request ID and
+ *   turning GraphQL errors into thrown errors. It holds no domain queries.
+ * - `HasuraService` (services/hasura.service.ts) is where domain operations
+ *   live (escrow status writes, notifications, refund retry counters, ...).
+ *   New code that needs Hasura should add or reuse a `HasuraService` method
+ *   rather than calling this client directly.
+ * - Import from this file directly only when building a new service, or in
+ *   tests that need to mock the transport.
+ */
 import { env } from "../config/env";
-import { queryWithTimeout } from "./postgres";
+import { getCorrelationId } from "../middleware/requestLogger";
 
 interface HasuraResponse<T> {
   data?: T;
@@ -51,7 +68,7 @@ export function createHasuraClient(): HasuraClient {
       options: HasuraRequestOptions = {}
     ): Promise<T> {
       const { url, adminSecret } = requireHasuraConfig();
-      const requestId = options.requestId ?? getRequestId();
+      const requestId = options.requestId ?? getCorrelationId();
       const headers: Record<string, string> = {
         "content-type": "application/json",
         "x-hasura-admin-secret": adminSecret,
@@ -89,139 +106,4 @@ export async function hasuraRequest<T>(
   options: HasuraRequestOptions = {}
 ): Promise<T> {
   return hasuraClient.request<T>(query, variables, options);
-}
-
-export interface EscrowStatusRow {
-  id: string;
-  contract_id: string;
-  status: string;
-  updated_at: string;
-}
-
-interface EscrowStatusQueryResult {
-  escrow_transactions: EscrowStatusRow[];
-}
-
-/**
- * Fetches a sample of recent escrow transactions from Hasura so their stored
- * status can be reconciled against Trustless Work's live state.
- *
- * This is a read-only helper used by the reconciliation job; it does not touch
- * the webhook write path that remains the single authoritative writer of
- * `escrow_transactions.status`.
- */
-export async function fetchRecentEscrowStatuses(
-  limit = 50,
-  options: HasuraRequestOptions = {}
-): Promise<EscrowStatusRow[]> {
-  const query = `
-    query RecentEscrowStatuses($limit: Int!) {
-      escrow_transactions(order_by: { updated_at: desc }, limit: $limit) {
-        id
-        contract_id
-        status
-        updated_at
-      }
-    }
-  `;
-
-  const data = await hasuraRequest<EscrowStatusQueryResult>(query, { limit }, options);
-  return data.escrow_transactions ?? [];
-}
-
-/**
- * Fetches recent escrow statuses directly from Postgres over `DATABASE_URL`.
- *
- * Uses the shared pool in `./postgres`, which applies explicit pool size,
- * idle timeout, connection timeout, and statement timeout settings rather
- * than relying on driver defaults. Prefer this over the Hasura GraphQL path
- * when a direct connection is available.
- */
-export async function fetchRecentEscrowStatusesFromPostgres(
-  limit = 50
-): Promise<EscrowStatusRow[]> {
-  const result = await queryWithTimeout<EscrowStatusRow>(
-    `SELECT id, contract_id, status, updated_at
-       FROM escrow_transactions
-      ORDER BY updated_at DESC
-      LIMIT $1`,
-    [limit]
-  );
-  return result.rows ?? [];
-}
-
-/**
- * Escrow statuses that represent funds a buyer has already committed against a
- * listing. While a listing has an escrow in one of these states, its price and
- * terms are frozen: the seller must create a new listing instead of editing the
- * one the buyer already agreed to.
- */
-export const LOCKED_ESCROW_STATUSES = [
-  "pending",
-  "funded",
-  "in_progress",
-  "in-progress",
-  "active",
-  "released",
-  "completed",
-  "complete",
-] as const;
-
-export interface ListingEscrowLockRow {
-  id: string;
-  status: string;
-}
-
-interface ListingEscrowLockQueryResult {
-  escrow_transactions: ListingEscrowLockRow[];
-}
-
-/**
- * Returns the escrow (if any) that locks a listing's price/terms.
- *
- * A listing is locked once a buyer has started an escrow against it (funds
- * committed) or the escrow has completed. Callers on the listing edit path
- * must reject price/terms changes when this returns a row, directing the
- * seller to create a new listing instead.
- */
-export async function findLockingEscrowForListing(
-  listingId: string,
-  options: HasuraRequestOptions = {}
-): Promise<ListingEscrowLockRow | null> {
-  const query = `
-    query LockingEscrowForListing($listingId: uuid!, $statuses: [String!]!) {
-      escrow_transactions(
-        where: { listing_id: { _eq: $listingId }, status: { _in: $statuses } }
-        limit: 1
-      ) {
-        id
-        status
-      }
-    }
-  `;
-
-  const data = await hasuraRequest<ListingEscrowLockQueryResult>(
-    query,
-    { listingId, statuses: [...LOCKED_ESCROW_STATUSES] },
-    options
-  );
-  return data.escrow_transactions?.[0] ?? null;
-}
-
-/**
- * Postgres-backed variant of {@link findLockingEscrowForListing} for callers
- * that already hold a direct connection. Mirrors the same lock semantics.
- */
-export async function findLockingEscrowForListingFromPostgres(
-  listingId: string
-): Promise<ListingEscrowLockRow | null> {
-  const result = await queryWithTimeout<ListingEscrowLockRow>(
-    `SELECT id, status
-       FROM escrow_transactions
-      WHERE listing_id = $1
-        AND status = ANY($2::text[])
-      LIMIT 1`,
-    [listingId, [...LOCKED_ESCROW_STATUSES]]
-  );
-  return result.rows?.[0] ?? null;
 }

@@ -32,6 +32,21 @@ When a new required variable is added to `src/config/env.ts`, add it to the
 `backend` service in `docker-compose.yml`, the root `.env.example`, and this
 table.
 
+## Talking to Hasura
+
+There is one path from backend code to Hasura, in two layers:
+
+| Layer | File | Role |
+|---|---|---|
+| Service | `src/services/hasura.service.ts` (`HasuraService`) | Domain operations (escrow status writes, notifications, refund retry counters, ...). **Start here.** |
+| Transport | `src/lib/hasura.ts` (`hasuraClient`, `hasuraRequest`) | Raw HTTP client: admin-secret header, request-ID forwarding, error mapping. No domain queries. |
+
+New code that needs Hasura should add or reuse a `HasuraService` method. Only
+services (and tests mocking the transport) should import `lib/hasura.ts`
+directly. A few older routes (`analytics.ts`, `users.ts`, `sync-user.ts`) still
+call `hasuraRequest` directly; move those queries into `HasuraService` when
+touching them.
+
 ## Simulating webhook deliveries locally
 
 `scripts/simulate-webhook.ts` builds a correctly HMAC-SHA256-signed

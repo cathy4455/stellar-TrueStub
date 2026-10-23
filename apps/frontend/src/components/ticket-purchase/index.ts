@@ -8,9 +8,7 @@
 export { EscrowCreationForm } from "./EscrowCreationForm";
 export type { EscrowCreationFormProps } from "./EscrowCreationForm";
 
-// Booking Escrow Wrapper (full integration)
-export { TicketEscrowWrapper } from "./TicketEscrowWrapper";
-export type { TicketEscrowWrapperProps } from "./TicketEscrowWrapper";
+// The escrow wrapper (full integration) lives in `@/components/ticket-listing`.
 
 // Escrow Confirmation
 export { EscrowConfirmation } from "./EscrowConfirmation";

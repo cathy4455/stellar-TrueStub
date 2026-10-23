@@ -72,4 +72,4 @@ Outer → inner:
   descendant uses `useEscrowAmountContext` / `useEscrowDialogs`. They are
   currently not mounted anywhere in the app.
 
-Reference usage: `src/components/ticket-purchase/TicketEscrowWrapper.tsx`.
+Reference usage: `src/components/ticket-listing/TicketEscrowWrapper.tsx`.

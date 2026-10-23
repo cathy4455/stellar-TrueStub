@@ -1,6 +1,15 @@
-import { hasuraClient } from "../lib/hasura";
+/**
+ * Domain-level Hasura operations (the top layer of backend → Hasura access).
+ *
+ * This is the one place backend code should go to read or write Hasura data.
+ * Each method builds its GraphQL document and delegates the HTTP call to the
+ * low-level transport in `lib/hasura.ts`, which owns the admin secret and
+ * error handling. See that file for the full layering note.
+ */
+import { hasuraClient, type HasuraRequestOptions } from "../lib/hasura";
+import { queryWithTimeout } from "../lib/postgres";
 import { AppError } from "../middleware/errorHandler";
-import { getRequestId } from "../lib/requestLogger";
+import { getCorrelationId as getRequestId } from "../middleware/requestLogger";
 
 interface EscrowMutationData {
   update_escrow_transactions?: { affected_rows?: number };
@@ -23,6 +32,45 @@ interface EscrowTransaction {
 
 interface EscrowByIdData {
   escrow_transactions_by_pk?: EscrowTransaction | null;
+}
+
+interface RefundRetryData {
+  refunds?: Array<{ id: string; retry_count?: number | null }>;
+}
+
+interface RefundRetryMutationData {
+  update_refunds?: { affected_rows?: number };
+}
+
+export interface EscrowStatusRow {
+  id: string;
+  contract_id: string;
+  status: string;
+  updated_at: string;
+}
+
+interface EscrowStatusQueryResult {
+  escrow_transactions?: EscrowStatusRow[];
+}
+
+export const LOCKED_ESCROW_STATUSES = [
+  "pending",
+  "funded",
+  "in_progress",
+  "in-progress",
+  "active",
+  "released",
+  "completed",
+  "complete",
+] as const;
+
+export interface ListingEscrowLockRow {
+  id: string;
+  status: string;
+}
+
+interface ListingEscrowLockQueryResult {
+  escrow_transactions?: ListingEscrowLockRow[];
 }
 
 export class HasuraService {
@@ -231,5 +279,74 @@ export class HasuraService {
       );
     }
     return { affected_rows: data.update_refunds?.affected_rows ?? 0 };
+  }
+
+  /**
+   * Fetches a sample of recent escrow transactions so their stored status can
+   * be reconciled against Trustless Work's live state.
+   *
+   * Read-only: it does not touch the webhook write path
+   * (`updateEscrowStatus`), which stays the single authoritative writer of
+   * `escrow_transactions.status`.
+   */
+  static async fetchRecentEscrowStatuses(
+    limit = 50,
+    options: HasuraRequestOptions = {}
+  ): Promise<EscrowStatusRow[]> {
+    const query = `
+      query RecentEscrowStatuses($limit: Int!) {
+        escrow_transactions(order_by: { updated_at: desc }, limit: $limit) {
+          id
+          contract_id
+          status
+          updated_at
+        }
+      }
+    `;
+
+    const data = await hasuraClient.request<EscrowStatusQueryResult>(
+      query,
+      { limit },
+      { requestId: options.requestId ?? getRequestId() }
+    );
+    return data.escrow_transactions ?? [];
+  }
+
+  static async findLockingEscrowForListing(
+    listingId: string,
+    options: HasuraRequestOptions = {}
+  ): Promise<ListingEscrowLockRow | null> {
+    const query = `
+      query LockingEscrowForListing($listingId: uuid!, $statuses: [String!]!) {
+        escrow_transactions(
+          where: { listing_id: { _eq: $listingId }, status: { _in: $statuses } }
+          limit: 1
+        ) {
+          id
+          status
+        }
+      }
+    `;
+
+    const data = await hasuraClient.request<ListingEscrowLockQueryResult>(
+      query,
+      { listingId, statuses: [...LOCKED_ESCROW_STATUSES] },
+      { requestId: options.requestId ?? getRequestId() }
+    );
+    return data.escrow_transactions?.[0] ?? null;
+  }
+
+  static async findLockingEscrowForListingFromPostgres(
+    listingId: string
+  ): Promise<ListingEscrowLockRow | null> {
+    const result = await queryWithTimeout<ListingEscrowLockRow>(
+      `SELECT id, status
+         FROM escrow_transactions
+        WHERE listing_id = $1
+          AND status = ANY($2::text[])
+        LIMIT 1`,
+      [listingId, [...LOCKED_ESCROW_STATUSES]]
+    );
+    return result.rows?.[0] ?? null;
   }
 }
